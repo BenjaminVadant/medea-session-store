@@ -1,111 +1,152 @@
-'use strict';
+const os = require('os');
+const path = require('path');
+const axios = require('axios');
+const tap = require('tap');
 
-var fs = require('fs');
-var os = require('os');
-var path = require('path');
-var request = require('request');
-var tap = require('tap');
-var test = tap.test;
-var express = require('express');
-var session = require('express-session');
-var rimraf = require('rimraf');
-var cookieParser = require('cookie-parser');
-var Store = require('./')(session);
+const { test } = tap;
+const express = require('express');
+const session = require('express-session');
+const rimraf = require('rimraf');
+const cookieParser = require('cookie-parser');
+const Store = require('.')(session);
 
-var app = express();
-var store = new Store(path.join(os.tmpdir(), 'medea-session-store'));
-var noPermPath = path.join(os.tmpdir(), 'noperms');
-var mw = session({
-  store: store,
-  key: 'sid',
-  secret: 'foobar',
-  resave: true,
-  saveUninitialized: true,
-  unset: 'destroy'
-});
+const app = express();
+const store = new Store(path.join(os.tmpdir(), 'medea-session-store'));
+const noPermPath = path.join(os.tmpdir(), 'noperms');
 
-var server = app
-  .use(cookieParser())
-  .use(mw)
-  .get('/', function(req, res) {
-    if(typeof req.session === undefined) {
-      return res.status(500).send('no');
-    }
-    res.send('ok');
-  })
-  .get('/bye', function(req, res) {
-    req.session.destroy();
-    res.send('ok');
-  })
-  .get('/nuke', function(req, res) {
-    store.destroy(req.cookies.sid, function() {
-      res.send();
-    });
-  })
-  .listen(1234);
-
-
-test('it stores session', function(t) {
-  request.get('http://localhost:1234/', function(err, res) {
-    t.notOk(!!err, 'no errors');
-    t.ok(res.headers['set-cookie'], 'setting a cookie');
-    store.length(function(err, len) {
-      t.notOk(!!err, 'no errors');
-      t.equal(len, 1, 'there is a session');
-      t.end();
-    });
+store.on('connect', () => {
+  // we wait for the medea instance to be ready
+  const mw = session({
+    store,
+    key: 'sid',
+    secret: 'foobar',
+    resave: true,
+    saveUninitialized: true,
+    unset: 'destroy',
   });
-});
 
-test('it deletes a session', function(t) {
-  request.get('http://localhost:1234/', function(err, res) {
-    t.notOk(!!err, 'no errors');
-    t.ok(res.headers['set-cookie'], 'setting a cookie');
-    var jar = request.jar();
-    var cookieVal = res.headers['set-cookie'][0].split('%3A')[1].split('.')[0];
-    var cookie = request.cookie('sid=' + cookieVal);
-    jar.setCookie(cookie, 'http://localhost:1234');
-    request({url: 'http://localhost:1234/bye', jar: jar}, function() {
-      store.length(function(err, len) {
+  const server = app
+    .use(cookieParser())
+    .use(mw)
+    .get('/', (req, res) => {
+      if (typeof req.session === 'undefined') {
+        res.status(500).send('no');
+      } else {
+        res.send('ok');
+      }
+    })
+    .get('/bye', (req, res) => {
+      req.session.destroy();
+      res.send('ok');
+    })
+    .get('/nuke', (req, res) => {
+      store.destroy(req.cookies.sid, () => {
+        res.send();
+      });
+    })
+    .listen(1234);
+
+
+  test('it stores session', (t) => {
+    axios.get('http://localhost:1234/')
+      .then((res) => {
+        t.ok(res.headers['set-cookie'], 'setting a cookie');
+        store.length((err, len) => {
+          t.notOk(!!err, 'no errors');
+          t.equal(len, 1, 'there is a session');
+          t.end();
+        });
+      })
+      .catch((err) => {
         t.notOk(!!err, 'no errors');
-        t.equal(len, 1, 'there is a session');
+      });
+  });
+
+  test('it deletes a session', (t) => {
+    axios.get('http://localhost:1234/')
+      .then((res) => {
+        t.ok(res.headers['set-cookie'], 'setting a cookie');
+
+        const cookieVal = res.headers['set-cookie'][0].split('%3A')[1].split('.')[0];
+
+        return axios.get(
+          'http://localhost:1234/bye',
+          {
+            headers: {
+              Cookie: `sid=${cookieVal}`,
+            },
+          },
+        );
+      })
+      .then(() => {
+        store.length((err, len) => {
+          t.notOk(!!err, 'no errors');
+          t.equal(len, 1, 'there is a session');
+          t.end();
+        });
+      })
+      .catch((err) => {
+        t.notOk(!!err, 'no errors');
+      });
+  });
+
+  test('it returns a falsy value when getting a non-existing session', (t) => {
+    const testStore = new Store(path.join(os.tmpdir(), 'foo'));
+    testStore.on('connect', () => {
+      testStore.get('bar', (err, sessionData) => {
+        t.notOk(!!err, 'no errors');
+        t.notOk(sessionData, 'session was falsy');
         t.end();
       });
     });
   });
-});
 
-test('it returns a falsy value when getting a non-existing session', function(t) {
-  var store = new Store(path.join(os.tmpdir(), 'foo'));
-  store.get('bar', function(err, session) {
-    t.notOk(!!err, 'no errors');
-    t.notOk(session, 'session was falsy');
+  test('deleting the session from the store works', (t) => {
+    axios.get('http://localhost:1234/')
+      .then((res) => {
+        t.ok(res.headers['set-cookie'], 'setting a cookie');
+
+        const cookieVal = res.headers['set-cookie'][0].split('%3A')[1].split('.')[0];
+
+        return axios.get(
+          'http://localhost:1234/nuke',
+          {
+            headers: {
+              Cookie: `sid=${cookieVal}`,
+            },
+          },
+        );
+      })
+      .then((res) => {
+        t.equal(res.status, 200, 'got 200');
+
+        return axios.get('http://localhost:1234/');
+      })
+      .then((res) => {
+        t.equal(res.status, 200, 'got 200');
+
+        t.end();
+      })
+      .catch((err) => {
+        t.notOk(!!err, 'no errors');
+      });
+  });
+
+  test('clearing the store works', (t) => {
+    store.clear(() => {
+      store.length((err, length) => {
+        t.notOk(!!err, 'no errors');
+        t.equal(length, 0, 'store empty');
+        t.end();
+      });
+    });
+  });
+
+  test('teardown', (t) => {
+    rimraf.sync(path.join(os.tmpdir(), 'medea-session-store'));
+    rimraf.sync(path.join(os.tmpdir(), 'foo'));
+    rimraf.sync(noPermPath);
+    server.close();
     t.end();
   });
-});
-
-test('deleting the session from the store works', function(t) {
-  request.get('http://localhost:1234/', function(err, res){
-    var jar = request.jar();
-    var cookieVal = res.headers['set-cookie'][0].split('%3A')[1].split('.')[0];
-    var cookie = request.cookie('sid=' + cookieVal);
-    jar.setCookie(cookie, 'http://localhost:1234');
-    request({url: 'http://localhost:1234/nuke', jar: jar}, function(err, res) {
-      t.notOk(!!err, 'no errors');
-      t.equal(res.statusCode, 200, 'got 200');
-      request({url: 'http://localhost:1234/', jar: jar}, function(err, res) {
-        t.notOk(!!err, 'no errors');
-        t.equal(res.statusCode, 200, 'got 200');
-        t.end();
-      });
-    });
-  });
-});
-
-test('teardown', function(t) {
-  rimraf.sync(path.join(os.tmpdir(), 'medea-session-store'));
-  rimraf.sync(path.join(os.tmpdir(), 'foo'));
-  rimraf.sync(noPermPath);
-  server.close();
-  t.end();
 });

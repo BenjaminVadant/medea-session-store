@@ -1,21 +1,18 @@
-'use strict';
+const util = require('util');
+const stringify = require('json-stringify-safe');
 
-var util = require('util');
-var stringify = require('json-stringify-safe');
-var lengthKey = '__length__';
+const lengthKey = '__length__';
 
-module.exports = function(session) {
-  var Store = session.Store;
+module.exports = (session) => {
+  const { Store } = session;
 
-  function MedeaSessionStore(db, opts) {
-    db = db || 'medea-session-store';
-    opts = opts || {};
+  function MedeaSessionStore(db = 'medea-session-store', opts = {}) {
     Store.call(this, opts);
     this.mungeKey = false;
     this.storeName = opts.ns || '_session';
 
     if (typeof db === 'string') {
-      this._createDB(db, opts);
+      this._createDB(db);
     } else {
       this.mungeKey = true;
       this.db = db;
@@ -24,112 +21,121 @@ module.exports = function(session) {
 
   util.inherits(MedeaSessionStore, Store);
 
-  MedeaSessionStore.prototype._createDB = function(name, opts) {
-    opts = opts || {};
-    var self = this;
+  MedeaSessionStore.prototype._createDB = function _createDB(name) {
+    const self = this;
 
     try {
-      var medea = require('medea');
+      // eslint-disable-next-line global-require
+      const medea = require('medea');
+      this.db = medea();
     } catch (err) {
-      throw new Error('If you are not passing in an existing medea instance, you must have the package medea installed. ' + err.message);
+      if (err.code !== 'MODULE_NOT_FOUND') {
+        throw new Error(`If you are not passing in an existing medea instance, you must have the package medea installed. ${err.message}`);
+      }
+      throw err;
     }
 
-    this.db = medea();
-    this.db.open(name, function(err) {
+    this.db.open(name, (err) => {
       if (err) {
         throw err;
       }
 
-      var key = self.getKey(lengthKey);
-      self.db.get(key, function(err, length) {
-        length = parseInt(length, 10) || 0;
-        self.db.put(key, length);
+      const key = self.getKey(lengthKey);
+      self.db.get(key, (error, length) => {
+        self.db.put(
+          key,
+          Number.parseInt(length, 10) || 0,
+        );
         self.emit('connect');
       });
     });
   };
 
-  MedeaSessionStore.prototype.getKey = function(key) {
+  MedeaSessionStore.prototype.getKey = function getKey(key) {
     if (this.mungeKey) {
       return [this.storeName, key].join('/');
     }
     return key;
   };
 
-  MedeaSessionStore.prototype.get = function(sid, cb){
-    this.db.get(this.getKey(sid), function(err, data) {
+  MedeaSessionStore.prototype.get = function get(sid, cb) {
+    this.db.get(this.getKey(sid), (err, data) => {
+      let error;
+      let sessionData;
+
       if (err && err.type !== 'NotFoundError') {
-        return cb(err);
+        error = err;
       }
-      var session;
 
       if (data) {
         try {
-          session = JSON.parse(data);
-        } catch (err) {
-          return cb(err);
+          sessionData = JSON.parse(data);
+        } catch (parseErr) {
+          error = parseErr;
         }
       }
 
-      cb(null, session);
+      cb(error, sessionData);
     });
   };
 
-  MedeaSessionStore.prototype.set = function(sid, session, cb){
-    var self = this;
-    session = stringify(session);
-    this.db.get(this.getKey(lengthKey), function(err, len) {
-      len = parseInt(len, 10) || 0;
-      var batch = self.db.createBatch();
-      batch.put(self.getKey(sid), session);
-      batch.put(self.getKey(lengthKey), ++len);
+  MedeaSessionStore.prototype.set = function set(sid, sessionData, cb) {
+    const self = this;
+    this.db.get(this.getKey(lengthKey), (err, len) => {
+      const batch = self.db.createBatch();
+
+      batch.put(self.getKey(sid), stringify(sessionData));
+      batch.put(self.getKey(lengthKey), (Number.parseInt(len, 10) || 0) + 1);
+
       self.db.write(batch, cb);
     });
   };
 
-  MedeaSessionStore.prototype.destroy = function(sid, cb){
-    var self = this;
-    this.db.get(this.getKey(lengthKey), function(err, len) {
-      len = parseInt(len, 10) || 0;
-      var batch = self.db.createBatch();
+  MedeaSessionStore.prototype.destroy = function destroy(sid, cb) {
+    const self = this;
+    this.db.get(this.getKey(lengthKey), (err, len) => {
+      const batch = self.db.createBatch();
+
       batch.remove(self.getKey(sid));
-      batch.put(self.getKey(lengthKey), --len);
+      batch.put(self.getKey(lengthKey), (Number.parseInt(len, 10) || 0) - 1);
+
       self.db.write(batch, cb);
     });
   };
 
-  MedeaSessionStore.prototype.touch = function(sid, session, cb){
-    session = stringify(session);
-    this.db.put(this.getKey(sid), session, function(err) {
-      cb && cb(err);
+  MedeaSessionStore.prototype.touch = function touch(sid, sessionData, cb) {
+    this.db.put(this.getKey(sid), stringify(sessionData), (err) => {
+      if (cb) {
+        cb(err);
+      }
     });
   };
 
-  MedeaSessionStore.prototype.length = function(cb){
-    this.db.get(this.getKey(lengthKey), function(err, len) {
-      return cb(err, parseInt(len, 10) || 0);
-    });
+  MedeaSessionStore.prototype.length = function length(cb) {
+    this.db.get(this.getKey(lengthKey), (err, len) => cb(err, parseInt(len, 10) || 0));
   };
 
-  MedeaSessionStore.prototype.clear = function(cb){
-    var self = this;
-    var total = 0;
-    var count = 0;
-    var streamDone = false;
+  MedeaSessionStore.prototype.clear = function clear(cb) {
+    const self = this;
+    let total = 0;
+    let count = 0;
+    let streamDone = false;
 
-    var done = function() {
-      ++count;
-      if (count === total && streamDone) {
-        cb && cb();
+    const done = function done() {
+      count += 1;
+      if ((count >= total || streamDone) && cb) {
+        cb();
       }
     };
-    this.db.listKeys(function(keys){
-      for(var i = 0; i < keys.length; i++){
-        if(self.mungeKey && keys[i].indexOf(self.storeName) === 0) {
+
+    this.db.listKeys((err, keys) => {
+      total = keys.length;
+      for (let i = 0; i < keys.length; i += 1) {
+        if (self.mungeKey && keys[i].indexOf(self.storeName) === 0) {
           self.db.remove(keys[i], done);
         }
       }
-      self.db.put(self.getKey(lengthKey), 0, function() {
+      self.db.put(self.getKey(lengthKey), 0, () => {
         streamDone = true;
         done();
       });
