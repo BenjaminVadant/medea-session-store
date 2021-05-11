@@ -1,6 +1,6 @@
 {
   "name": "medea-session-store",
-  "version": "2.1.1",
+  "version": "2.2.0",
   "description": "A session store for express-session using medea",
   "main": "index.js",
   "scripts": {
@@ -32,14 +32,14 @@
   "devDependencies": {
     "axios": "^0.21.1",
     "cookie-parser": "^1.4.5",
-    "eslint": "^6.8.0",
-    "eslint-config-airbnb-base": "^14.1.0",
-    "eslint-plugin-import": "^2.20.2",
+    "eslint": "^7.26.0",
+    "eslint-config-airbnb-base": "^14.2.1",
+    "eslint-plugin-import": "^2.22.1",
     "express": "^4.17.1",
     "express-session": "^1.17.1",
     "medea": "^1.0.3",
     "rimraf": "^3.0.2",
-    "tap": "~14.10.7"
+    "tap": "~15.0.9"
   },
   "peerDependencies": {
     "medea": "^1.0.3"

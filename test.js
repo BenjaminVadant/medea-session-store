@@ -46,7 +46,6 @@ store.on('connect', () => {
     })
     .listen(1234);
 
-
   test('it stores session', (t) => {
     axios.get('http://localhost:1234/')
       .then((res) => {
