@@ -57,6 +57,6 @@ app.use(mw);
 
 ## License
 
-Copyright 2016 Benjamin VADANT. Available under the MIT license.
+Copyright 2022 Benjamin VADANT. Available under the MIT license.
 
 Base on Scripto's package level-session-store
