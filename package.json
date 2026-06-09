@@ -39,7 +39,7 @@
     "express-session": "^1.17.3",
     "medea": "^1.0.3",
     "rimraf": "^3.0.2",
-    "tap": "~16.3.0"
+    "tap": "~21.7.4"
   },
   "peerDependencies": {
     "medea": "^1.0.3"
